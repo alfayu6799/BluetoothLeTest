@@ -1,10 +1,5 @@
 package com.example.bluetoothletest;
 
-import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
-
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
@@ -15,18 +10,38 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
+import android.provider.MediaStore;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.Toast;
 
+import com.bumptech.glide.Glide;
+
+import java.io.File;
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
@@ -34,7 +49,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private final int REQUEST_ENABLE_BT = 1;
     private RecyclerView rvDeviceList;
-    private Button btnScan, send;
+    private Button btnScan, send, takePhoto;
     private BluetoothAdapter mBtAdapter;
     private BleService mBleService;
     private BroadcastReceiver mBleReceiver;
@@ -42,16 +57,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private List<BluetoothDevice> mBluetoothDeviceList;
     private List<String> mRssiList;
 
+    private String mPath;
+    public final int REQUEST_IMAGE = 101;
+    private ImageView picture;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        rvDeviceList = findViewById(R.id.rv_device_list);
-        btnScan = findViewById(R.id.button);
-        btnScan.setOnClickListener(this);
-        send = findViewById(R.id.btnSend);
-        send.setOnClickListener(this);
+        initView();
+
 
         //初始化蓝牙
         initBle();
@@ -62,6 +78,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         //注册蓝牙信息接收器
         registerBleReceiver();
 
+    }
+
+    private void initView() {
+        rvDeviceList = findViewById(R.id.rv_device_list);
+        btnScan = findViewById(R.id.button);
+        btnScan.setOnClickListener(this);
+        send = findViewById(R.id.btnSend);
+        send.setOnClickListener(this);
+        takePhoto = findViewById(R.id.btnShots);
+        takePhoto.setOnClickListener(this);
+        picture = findViewById(R.id.imageView);
     }
 
     private void initData() {
@@ -203,6 +230,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
     }
 
+    @SuppressLint("NonConstantResourceId")
     @Override
     public void onClick(View view) {
         switch (view.getId()) {
@@ -215,13 +243,40 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 registerBleReceiver();
                 break;
             case R.id.btnSend:
-                sendCommand();
+                sendCommand(); //量測command
+                break;
+            case R.id.btnShots:
+                openCamera();  //開啟相機功能
                 break;
             default:
                 break;
         }
     }
 
+    //開啟相機功能
+    private void openCamera() {
+        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        File imageFile = getImageFile();
+        Uri imageUri = FileProvider.getUriForFile(this,"com.example.bluetoothletest.fileprovider", imageFile);
+        cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, imageUri);
+        startActivityForResult(cameraIntent, REQUEST_IMAGE);
+    }
+
+    //取得相片的URL及檔名
+    private File getImageFile() {
+        String time = new SimpleDateFormat("yyMMdd").format(new Date());
+        String fileName = time+"_";
+        File dir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+        try {
+            File imageFile = File.createTempFile(fileName,".jpg",dir);
+            mPath = imageFile.getAbsolutePath();
+            return imageFile;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    //量測command
     private void sendCommand(){
         String request = "AIDO,0";
         byte[] messageBytes = new byte[0];
@@ -242,13 +297,36 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         switch (requestCode) {
             case REQUEST_ENABLE_BT:
-                // 搜索蓝牙设备
-                scanBleDevice();
+                scanBleDevice(); //搜索蓝牙设备
                 break;
-
+            case REQUEST_IMAGE:  //顯示照片
+                showPhoto();
+                break;
             default:
                 break;
         }
+    }
+
+    //顯示照片
+    private void showPhoto() {
+        new Thread(()->{
+            //在BitmapFactory中以檔案URI路徑取得相片檔案，並處理為AtomicReference<Bitmap>，方便後續旋轉圖片
+            AtomicReference<Bitmap> getHighImage = new AtomicReference<>(BitmapFactory.decodeFile(mPath));
+            Matrix matrix = new Matrix();
+//            matrix.setRotate(90f);//轉90度
+            getHighImage.set(Bitmap.createBitmap(getHighImage.get()
+                    ,0,0
+                    ,getHighImage.get().getWidth()
+                    ,getHighImage.get().getHeight()
+                    ,matrix,true));
+            runOnUiThread(()->{
+                //以Glide設置圖片(因為旋轉圖片屬於耗時處理，故會LAG一下，且必須使用Thread執行緒)
+                Glide.with(this)
+                        .load(getHighImage.get())
+                        .centerCrop()
+                        .into(picture);
+            });
+        }).start();
     }
 
     @Override
