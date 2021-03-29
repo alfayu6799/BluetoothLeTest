@@ -329,7 +329,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             messageBytes = request.getBytes("UTF-8");
 
             mBleService.writeDataToDevice(messageBytes,bleDeviceAddress);
-            Log.d(TAG, "sendCommand: " + messageBytes + " device:" + bleDeviceAddress);
+            //Log.d(TAG, "sendCommand: " + messageBytes + " device:" + bleDeviceAddress);
 
         } catch (UnsupportedEncodingException e) {
             e.printStackTrace();
