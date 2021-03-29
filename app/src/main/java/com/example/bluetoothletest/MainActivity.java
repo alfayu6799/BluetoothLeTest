@@ -24,6 +24,7 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.bumptech.glide.Glide;
@@ -43,6 +44,8 @@ import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import static com.example.bluetoothletest.BleService.ACTION_DATA_AVAILABLE;
+
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
     private static final String TAG = "MainActivity";
@@ -57,9 +60,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private List<BluetoothDevice> mBluetoothDeviceList;
     private List<String> mRssiList;
 
+    private String bleDeviceAddress;
+
     private String mPath;
     public final int REQUEST_IMAGE = 101;
     private ImageView picture;
+
+    private TextView result;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,6 +96,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         takePhoto = findViewById(R.id.btnShots);
         takePhoto.setOnClickListener(this);
         picture = findViewById(R.id.imageView);
+        result = findViewById(R.id.tvResult);
     }
 
     private void initData() {
@@ -104,9 +112,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mDeviceListAdapter.setOnItemClickListener(new DeviceListAdapter.OnItemClickListener() {
             @Override
             public void onItemClick(View view, int position) {
-                Toast.makeText(MainActivity.this, "開始連接", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "開始連接" + mBluetoothDeviceList.get(position).getAddress(), Toast.LENGTH_SHORT).show();
+                bleDeviceAddress = mBluetoothDeviceList.get(position).getAddress();
+
                 mBtAdapter.stopLeScan(mLeScanCallback);
-                mBleService.connect(mBtAdapter, mBluetoothDeviceList.get(position).getAddress());
+//                mBleService.connect(mBtAdapter, mBluetoothDeviceList.get(position).getAddress());
+                mBleService.connect(mBluetoothDeviceList.get(position).getAddress());
+
             }
         });
 
@@ -141,16 +153,35 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         bindService(intent, mServiceConnection, Context.BIND_AUTO_CREATE);
         startService(intent);
 
+        mBleReceiver = new BleReceiver();
+
+        registerReceiver(mBleReceiver,makeGattUpdateIntentFilter());
+    }
+
+    public static IntentFilter makeGattUpdateIntentFilter(){
         // 注册蓝牙信息广播接收器
         IntentFilter filter = new IntentFilter();
         filter.addAction(BleService.ACTION_GATT_CONNECTED);
         filter.addAction(BleService.ACTION_GATT_DISCONNECTED);
         filter.addAction(BleService.ACTION_GATT_SERVICES_DISCOVERED);
         filter.addAction(BleService.ACTION_DATA_AVAILABLE);
+        filter.addAction(BleService.ACTION_NOTIFY_ON);
         filter.addAction(BleService.ACTION_CONNECTING_FAIL);
-        mBleReceiver = new BleReceiver();
-        registerReceiver(mBleReceiver, filter);
+        filter.addAction(BleService.EXTRA_MAC);
+        return  filter;
     }
+
+    public static IntentFilter makeGattUpdateIntentFilter(String address){
+        // 注册蓝牙信息广播接收器
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(address + BleService.ACTION_GATT_CONNECTED);
+        filter.addAction(address + BleService.ACTION_GATT_DISCONNECTED);
+        filter.addAction(address + BleService.ACTION_GATT_SERVICES_DISCOVERED);
+        filter.addAction(address + BleService.ACTION_DATA_AVAILABLE);
+        filter.addAction(address + BleService.ACTION_CONNECTING_FAIL);
+        return  filter;
+    }
+
 
     /**
      * 搜索蓝牙设备回调
@@ -173,6 +204,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private ServiceConnection mServiceConnection = new ServiceConnection() {
         public void onServiceConnected(ComponentName className, IBinder rawBinder) {
             mBleService = ((BleService.LocalBinder) rawBinder).getService();
+
+            Log.d(TAG, "onServiceConnected: " + bleDeviceAddress);
+            //auto connect to the device upon successful start-up init
+//            mBluetoothLeService.connect(mBluetoothAdapter, deviceAddress);
+
         }
 
         public void onServiceDisconnected(ComponentName classname) {
@@ -207,21 +243,30 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             switch (action) {
                 case BleService.ACTION_GATT_CONNECTED:
                     Toast.makeText(MainActivity.this, "蓝牙已连接", Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, "onReceive: ");
+//                    result.setText("蓝牙已连接");
                     break;
 
                 case BleService.ACTION_GATT_DISCONNECTED:
                     Toast.makeText(MainActivity.this, "蓝牙已断开", Toast.LENGTH_SHORT).show();
+                    result.setText("藍芽已斷開");
+                    Log.d(TAG, "藍芽已斷開???: " + bleDeviceAddress);
                     mBleService.release();
                     break;
 
                 case BleService.ACTION_CONNECTING_FAIL:
                     Toast.makeText(MainActivity.this, "蓝牙已断开", Toast.LENGTH_SHORT).show();
+                    result.setText("蓝牙已断开");
                     mBleService.disconnect();
                     break;
-
-                case BleService.ACTION_DATA_AVAILABLE:
+                case BleService.ACTION_NOTIFY_ON:
+                    Toast.makeText(MainActivity.this, "啟動通知成功", Toast.LENGTH_SHORT).show();
+                    result.setText("藍芽已連接");
+                    break;
+                case ACTION_DATA_AVAILABLE:
                     byte[] data = intent.getByteArrayExtra(BleService.EXTRA_DATA);
-                    Log.i("蓝牙", "收到的数据：" + ByteUtils.byteArrayToHexString(data));
+                    String address = intent.getStringExtra(BleService.EXTRA_MAC);
+                    Log.i("蓝牙", "收到的原始數據：" + ByteUtils.byteArrayToString(data) + " device:" + address);
                     break;
 
                 default:
@@ -282,8 +327,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         byte[] messageBytes = new byte[0];
         try {
             messageBytes = request.getBytes("UTF-8");
-            boolean success = mBleService.sendData(messageBytes); //傳送資料
-            Log.d(TAG, "sendCommand: " + success);
+
+            mBleService.writeDataToDevice(messageBytes,bleDeviceAddress);
+            Log.d(TAG, "sendCommand: " + messageBytes + " device:" + bleDeviceAddress);
+
         } catch (UnsupportedEncodingException e) {
             e.printStackTrace();
         }
@@ -332,6 +379,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        Log.d(TAG, "onDestroy: ");
         if (mBleReceiver != null) {
             unregisterReceiver(mBleReceiver);
             mBleReceiver = null;

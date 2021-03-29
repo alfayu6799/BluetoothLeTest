@@ -1,9 +1,19 @@
 package com.example.bluetoothletest;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 public class ByteUtils {
+
+    public static String byteArrayToString(byte[] array){
+        if (array == null)
+            return "";
+
+        String byteString = new String(array, StandardCharsets.UTF_8);
+
+        return byteString;
+    }
     /**
      * 十六进制字符串转byte[]
      *
